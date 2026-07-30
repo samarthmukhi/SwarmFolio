@@ -1,5 +1,6 @@
 #Piece 1 (Data Cleaning for Clean Sharpe Calculation)
 import numpy as np
+from src.metrics import sharpe_ratio
 def repair_weights(w):
     w = np.maximum(w, 0) #this helps us turn negative weights to zero so that we can follow the rules of portfolio allocation (no short selling)
     return w/np.sum(w) #this ensures that the weights sum to 1 which is a requirement for portfolio allocation 100%
@@ -23,7 +24,31 @@ def update_swarm(positions, velocities, pbest, gbest, w = 0.7, c1=1.5, c2=1.5):
     positions += velocities #this updates the positions of the particles based on their new velocities      
     for i in range(num_particles):
         positions[i] = repair_weights(positions[i]) #this ensures that the weights of the portfolio allocation sum to 1 and are all non-negative after the update. this is important because we want to ensure that the portfolio allocation is valid after each update.    
-    return positions, velocities                               
+    return positions, velocities 
+
+# Piece 4 (Main PSO Loop)
+def run_pso(mean_returns, cov, num_particles=50, iterations=500):
+    num_assets = len(mean_returns)
+    positions, velocities = initialize_swarm(num_particles, num_assets)
+    scores = np.zeros(num_particles)
+    for i in range(num_particles):
+        scores[i] = sharpe_ratio(positions[i], mean_returns, cov)
+    pbest = positions.copy()
+    pbest_scores = scores.copy()
+    gbest = positions[scores.argmax()].copy()
+    gbest_score = scores.max()
+    for step in range(iterations):
+        positions, velocities = update_swarm(positions, velocities, pbest, gbest)
+        for i in range(num_particles):
+            scores[i] = sharpe_ratio(positions[i], mean_returns, cov)
+            if scores[i] > pbest_scores[i]:
+                pbest[i] = positions[i].copy()
+                pbest_scores[i] = scores[i]
+        if scores.max() > gbest_score:
+            gbest = positions[scores.argmax()].copy()
+            gbest_score = scores.max()
+    return gbest, gbest_score
+
 
 if __name__ == "__main__":
     # --- quick test for 1
