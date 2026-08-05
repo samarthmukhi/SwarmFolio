@@ -26,13 +26,16 @@ def update_swarm(positions, velocities, pbest, gbest, w = 0.7, c1=1.5, c2=1.5):
         positions[i] = repair_weights(positions[i]) #this ensures that the weights of the portfolio allocation sum to 1 and are all non-negative after the update. this is important because we want to ensure that the portfolio allocation is valid after each update.    
     return positions, velocities 
 
-# Piece 4 (Main PSO Loop)
-def run_pso(mean_returns, cov, num_particles=50, iterations=500):
+# Piece 4 (Main PSO Loop) -- now constraint-aware
+def run_pso(mean_returns, cov, num_particles=50, iterations=500,
+            max_holdings=None, min_weight=0.0, penalty=10.0):          # 👈
     num_assets = len(mean_returns)
+    if max_holdings is None:
+        max_holdings = num_assets                                       # 👈
     positions, velocities = initialize_swarm(num_particles, num_assets)
     scores = np.zeros(num_particles)
     for i in range(num_particles):
-        scores[i] = sharpe_ratio(positions[i], mean_returns, cov)
+        scores[i] = constrained_score(positions[i], mean_returns, cov, max_holdings, min_weight, penalty)  # 👈
     pbest = positions.copy()
     pbest_scores = scores.copy()
     gbest = positions[scores.argmax()].copy()
@@ -40,7 +43,7 @@ def run_pso(mean_returns, cov, num_particles=50, iterations=500):
     for step in range(iterations):
         positions, velocities = update_swarm(positions, velocities, pbest, gbest)
         for i in range(num_particles):
-            scores[i] = sharpe_ratio(positions[i], mean_returns, cov)
+            scores[i] = constrained_score(positions[i], mean_returns, cov, max_holdings, min_weight, penalty)  # 👈
             if scores[i] > pbest_scores[i]:
                 pbest[i] = positions[i].copy()
                 pbest_scores[i] = scores[i]
@@ -48,6 +51,28 @@ def run_pso(mean_returns, cov, num_particles=50, iterations=500):
             gbest = positions[scores.argmax()].copy()
             gbest_score = scores.max()
     return gbest, gbest_score
+
+# Piece 5 (Measuring Constraint Violations)
+def cardinality_violation(weights, max_holdings, threshold=0.01):
+    num_holdings = np.sum(weights > threshold) #count holdings above 1%
+    return max(0, num_holdings - max_holdings) #how many over the limit
+
+def min_position_violation(weights, min_weight, threshold=0.01):
+    undersized = weights[(weights > threshold) & (weights < min_weight)] 
+    return np.sum(min_weight - undersized) #shortfall below min (total)
+
+def measure_violations(weights, max_holdings, min_weight):
+    return {
+        "cardinality": cardinality_violation(weights, max_holdings),
+        "min_position": min_position_violation(weights, min_weight),
+    }
+
+# Piece 6 (Constrained fitness = Sharpe minus penalties)
+def constrained_score(weights, mean_returns, cov, max_holdings, min_weight, penalty=10.0):
+    base = sharpe_ratio(weights, mean_returns, cov)
+    v = measure_violations(weights, max_holdings, min_weight)
+    total_violation = v["cardinality"] + v["min_position"]
+    return base - penalty * total_violation
 
 
 if __name__ == "__main__":
@@ -64,5 +89,3 @@ if __name__ == "__main__":
     print("positions shape :", positions.shape)        # should be (5, 4)
     print("each row sums to:", positions.sum(axis=1))  # should all be 1
     print("velocities shape:", velocities.shape)       # should be (5, 4)
-
-
