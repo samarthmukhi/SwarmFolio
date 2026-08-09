@@ -36,3 +36,17 @@ def backtest(returns, optimize_fn, lookback=252, rebalance_every=63, cost=0.001)
         daily.append(day_return)
 
     return pd.Series(curve, index=returns.index[lookback:]), np.array(daily), total_turnover
+
+def backtest_metrics(curve, daily, risk_free=0.04):
+    years = len(daily) / 252
+    total_return  = curve.iloc[-1] - 1
+    annual_return = curve.iloc[-1] ** (1 / years) - 1
+    sharpe        = (daily.mean() * 252 - risk_free) / (daily.std() * np.sqrt(252))
+    running_max   = np.maximum.accumulate(curve.values)
+    max_drawdown  = ((curve.values - running_max) / running_max).min()
+    return {
+        "total_return":  total_return,
+        "annual_return": annual_return,
+        "sharpe":        sharpe,
+        "max_drawdown":  max_drawdown,
+    }
