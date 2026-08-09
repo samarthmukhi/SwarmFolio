@@ -9,4 +9,11 @@ export default defineConfig({
     // force a single copy of React (fixes "Invalid hook call / more than one copy of React")
     dedupe: ['react', 'react-dom'],
   },
+  server: {
+    // in dev, forward API calls to the local FastAPI server
+    proxy: {
+      '/optimize': 'http://localhost:8000',
+      '/health': 'http://localhost:8000',
+    },
+  },
 })

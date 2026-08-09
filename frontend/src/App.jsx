@@ -180,7 +180,7 @@ export default function App() {
 
     // the real work + a minimum on-screen duration, whichever is longer
     const minDuration = new Promise((r) => setTimeout(r, STAGES.length * 1000 + 400))
-    const fetchData = fetch("http://localhost:8000/optimize", {
+    const fetchData = fetch(`${import.meta.env.VITE_API_URL || ""}/optimize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
