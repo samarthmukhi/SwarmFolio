@@ -9,10 +9,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import numpy as np
+
 from src.data_loader import load_prices_cached, compute_daily_returns, compute_covariance
-from src.metrics import portfolio_return
-from src.pso import optimize_portfolio
-from src.baseline import max_sharpe_portfolio
+from src.pso import optimize_portfolio, run_pso
 from src.backtest import backtest, backtest_metrics
 
 TICKERS = ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN", "META", "JPM", "GS", "BAC",
@@ -34,15 +34,7 @@ _inv = _rets[INVEST]
 MEAN = (_inv.mean() * 252).values
 COV = compute_covariance(_inv).values
 
-_curve, _daily, _turn = backtest(_inv, max_sharpe_portfolio)
-_bt = backtest_metrics(_curve, _daily)
-_step = max(1, len(_curve) // 120)
-EQUITY = [
-    {"t": float(_curve.index[i].year) + _curve.index[i].month / 12.0,
-     "value": round(float(_curve.iloc[i]), 3)}
-    for i in range(0, len(_curve), _step)
-]
-BACKTEST_MAX_DD = float(_bt["max_drawdown"])
+# (backtest is now run per-request with the user's constraints, in /optimize)
 
 
 class OptimizeReq(BaseModel):
@@ -58,6 +50,9 @@ def health():
 
 @app.post("/optimize")
 def optimize(req: OptimizeReq):
+    np.random.seed(42)  # deterministic per constraint set (same inputs -> same result)
+
+    # current best allocation + honest feasibility verdict (full PSO)
     res = optimize_portfolio(
         MEAN, COV,
         max_holdings=req.max_holdings,
@@ -69,12 +64,32 @@ def optimize(req: OptimizeReq):
         [{"ticker": INVEST[i], "weight": float(w[i])} for i in range(len(w)) if w[i] > 0.01],
         key=lambda h: -h["weight"],
     )
+
+    # constraint-aware walk-forward backtest (lean PSO + annual rebalance for speed)
+    def strategy(mean, cov):
+        return run_pso(
+            mean, cov,
+            max_holdings=req.max_holdings,
+            min_weight=req.min_weight,
+            min_holdings=req.min_holdings,
+            num_particles=20, iterations=70,
+        )[0]
+
+    curve, daily, _turn = backtest(_inv, strategy, lookback=252, rebalance_every=252)
+    bt = backtest_metrics(curve, daily)
+    step = max(1, len(curve) // 120)
+    equity = [
+        {"t": float(curve.index[i].year) + curve.index[i].month / 12.0,
+         "value": round(float(curve.iloc[i]), 3)}
+        for i in range(0, len(curve), step)
+    ]
+
     return {
         "feasible": bool(res["feasible"]),
         "violations": {k: float(v) for k, v in res["violations"].items()},
-        "sharpe": float(res["sharpe"]),
-        "annual_return": float(portfolio_return(w, MEAN)),
-        "max_drawdown": BACKTEST_MAX_DD,
+        "sharpe": float(bt["sharpe"]),
+        "annual_return": float(bt["annual_return"]),
+        "max_drawdown": float(bt["max_drawdown"]),
         "holdings": holdings,
-        "equity": EQUITY,
+        "equity": equity,
     }
